@@ -1,4 +1,4 @@
-use warp::{ Filter, Reply };
+use warp::Filter;
 use serde::{ Serialize, Deserialize };
 use std::{ collections::HashMap, sync::{ Arc, Mutex } };
 use tokio::sync::Mutex as AsyncMutex;
@@ -23,12 +23,6 @@ async fn read_employee_name(id: u32, employees: EmployeeMap) -> Option<String> {
     guard.get(&id).cloned()
 }
 
-async fn get_employee_name(id: u32, employees: EmployeeMap) -> Result<impl Reply, warp::Rejection> {
-    match read_employee_name(id, employees).await {
-        Some(name) => Ok(warp::reply::json(&(Employee { id, name }))),
-        None => Ok(warp::reply::json(&format!("Employee with ID {} not found", id))),
-    }
-}
 #[tokio::main]
 async fn main() {
     // Initialize the vector to store items
@@ -59,13 +53,18 @@ async fn main() {
     });
 
     let employees: EmployeeMap = Arc::new(AsyncMutex::new(HashMap::new()));
-    let get_employee_name_route = warp
+    let get_employee_name = warp
         ::path!("employees" / u32)
         .and(warp::any().map(move || employees.clone()))
-        .and_then(get_employee_name);
+        .and_then(|id, employees: EmployeeMap| async move {
+            match read_employee_name(id, employees).await {
+                Some(name) => Ok::<_, warp::Rejection>(warp::reply::json(&Employee { id, name })),
+                None => Ok(warp::reply::json(&format!("Employee with ID {} not found", id))),
+            }
+        });
 
     // Combine filters into the main API
-    let api = warp::post().and(create_item.or(get_all_items).or(get_employee_name_route));
+    let api = warp::post().and(create_item.or(get_all_items).or(get_employee_name));
 
     // Run the server
     warp::serve(api).run(([127, 0, 0, 1], 8080)).await;
